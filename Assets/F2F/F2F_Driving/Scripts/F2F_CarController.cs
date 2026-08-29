@@ -1,239 +1,345 @@
 using System;
 using UnityEngine;
 
-
-public enum RotationAxis // allows us to choose which axis we want to rotate ON
+public enum RotationAxis
 {
-    x, 
-    y, 
-    z
+    X,
+    Y,
+    Z,
+    x = X,
+    y = Y,
+    z = Z
 }
 
-
+/// <summary>
+/// Fears to Fathom Style FPS Car Controller.
+/// Polished arcade-sphere physics controller designed for first-person interior driving.
+/// </summary>
+[RequireComponent(typeof(Rigidbody))]
 public class F2F_CarController : MonoBehaviour
 {
-
-    [Header("Movement")]
+    #region Movement & Physics
+    [Header("=== MOVEMENT & HANDLING ===")]
+    [Tooltip("Engine acceleration force.")]
     public float acceleration = 10f;
+
+    [Tooltip("Maximum forward/reverse speed.")]
     public float maxSpeed = 6f;
+
+    [Tooltip("Steering agility / turning speed.")]
     public float turnSpeed = 8f;
 
-    [Header("Grounding")]
+    [Tooltip("Braking deceleration multiplier.")]
+    public float brakeStrength = 6f;
+    #endregion
+
+    #region Grounding & Slope Alignment
+    [Header("=== GROUND DETECTION & ALIGNMENT ===")]
+    [Tooltip("Raycast distance downwards to check for road/terrain.")]
     public float rayLength = 2.5f;
+
+    [Tooltip("Layers recognized as drivable ground.")]
     public LayerMask groundLayer;
 
+    [Tooltip("How smoothly the car aligns with road slopes (lower = slower/heavier).")]
+    public float titleSmoothness = 1f;
+    #endregion
 
-    [Header("Steering Wheel Visuals")]
+    #region Interior Cabin Visuals (Steering Wheel & Gauges)
+    [Header("=== INTERIOR: STEERING WHEEL ===")]
     public bool useSteerInput = true;
     public Transform steeringWheel;
-    public RotationAxis steeringWheelAxis = RotationAxis.z;
+    public RotationAxis steeringWheelAxis = RotationAxis.Z;
     public float maxSteeringAngle = 120f;
     public float steerSmoothness = 10f;
-    private float currentSteerAngle = 0f;
 
-    [Header("Speedometer Needle")]
+    [Header("=== INTERIOR: SPEEDOMETER GAUGE ===")]
     public bool useSpeedometer = true;
     public Transform SpeedNeedle;
-    public RotationAxis speedNeedleAxis = RotationAxis.z;
+    public RotationAxis speedNeedleAxis = RotationAxis.Z;
     public float speedMinAngle = 135f;
     public float speedMaxAngle = -35f;
-    public float speedSmoothness = 3f;
-    private float currentSpeedAngle;
+    public float speedSmoothness = 4f;
 
-    [Header("RPM Meter")]
+    [Header("=== INTERIOR: RPM GAUGE (SIMULATED GEARS) ===")]
     public bool UseRPMMeter = true;
     public Transform RPMNeedle;
-    public RotationAxis RPMneedleAxis = RotationAxis.z;
+    public RotationAxis RPMneedleAxis = RotationAxis.Z;
     public float RPMMinAngle = 135f;
     public float RPMMaxAngle = -45f;
-    public float RPMSmoothness = 15f;
-    private float currentRPMAngle;
+    public float RPMSmoothness = 12f;
 
+    [Tooltip("Simulated idle RPM value.")]
+    public float idleRPM = 850f;
 
+    [Tooltip("Redline / maximum RPM.")]
+    public float maxRPM = 7000f;
 
+    [Tooltip("Number of transmission gears for realistic RPM rev & shift bounce.")]
+    [Range(3, 7)] public int gearCount = 5;
+    #endregion
+
+    #region Retro Atmosphere & Lighting
+    [Header("=== RETRO LIGHTING (OPTIONAL) ===")]
+    [Tooltip("Headlight objects / spot lights.")]
+    public GameObject[] headlights;
+    public KeyCode toggleHeadlightsKey = KeyCode.F;
+
+    [Tooltip("Dashboard backlight or interior dome light.")]
+    public GameObject[] interiorLights;
+    public KeyCode toggleInteriorLightKey = KeyCode.L;
+    #endregion
+
+    #region Audio SFX
+    [Header("=== AUDIO SFX (OPTIONAL) ===")]
+    [Tooltip("Audio source looping engine sound (pitch shifts with RPM).")]
+    public AudioSource engineAudioSource;
+    public float minEnginePitch = 0.8f;
+    public float maxEnginePitch = 2.2f;
+
+    [Tooltip("Click sound when toggling lights.")]
+    public AudioSource switchAudioSource;
+    public AudioClip lightSwitchSound;
+    #endregion
+
+    #region Runtime Variables
+    [Header("=== RIGIDBODY ===")]
     public Rigidbody rb;
+
     private float moveInput;
     private float turnInput;
+    private bool isBraking;
     private bool isGrounded;
+    private float currentSpeed;
+    private float currentSteerAngle = 0f;
+    private float currentSpeedAngle;
+    private float currentRPMAngle;
+    private float currentCalculatedRPM;
 
-    public float titleSmoothness = 1f; // lower = slower, higher = snappier
+    private bool headlightsOn = false;
+    private bool interiorLightsOn = false;
 
+    // Public getters
+    public float CurrentSpeedKmh => currentSpeed * 3.6f;
+    public float CurrentRPM => currentCalculatedRPM;
+    public bool IsGrounded => isGrounded;
+    public bool HeadlightsOn => headlightsOn;
+    #endregion
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
+    #region Unity Lifecycle
+    private void Start()
     {
+        if (rb == null) rb = GetComponent<Rigidbody>();
 
-        // move center of mass down a little to prevent weird movement 
-        rb.centerOfMass = new Vector3(0f, -1f, 0);
+        // Lower center of mass to stabilize the sphere physics
+        if (rb != null) rb.centerOfMass = new Vector3(0f, -1f, 0f);
 
-        // Lock cursor
+        // Lock cursor for FPS experience
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
 
-        // Initial value for our current angles
+        // Initialize gauge needle angles
         if (useSpeedometer) currentSpeedAngle = speedMinAngle;
-        if (UseRPMMeter) currentRPMAngle = RPMMinAngle;
+        if (UseRPMMeter)
+        {
+            currentRPMAngle = RPMMinAngle;
+            currentCalculatedRPM = idleRPM;
+        }
 
-
-
+        // Apply initial lighting
+        UpdateLightObjects(headlights, headlightsOn);
+        UpdateLightObjects(interiorLights, interiorLightsOn);
     }
 
     private void Update()
     {
+        // Smooth player input
+        moveInput = Input.GetAxis("Vertical");
+        turnInput = Input.GetAxis("Horizontal");
+        isBraking = Input.GetKey(KeyCode.Space);
 
-        moveInput = Input.GetAxis("Vertical"); // W/S to move
-        turnInput = Input.GetAxis("Horizontal"); // A/D for direction
+        // Atmosphere controls
+        HandleLightingInputs();
 
-
-        if(useSteerInput) UpdateSteeringWheel();
+        // Dashboard & Interior Visuals
+        if (useSteerInput) UpdateSteeringWheel();
         if (useSpeedometer || UseRPMMeter) UpdateNeedles();
 
-
+        // Audio
+        UpdateEngineAudio();
     }
-
 
     private void FixedUpdate()
     {
+        if (rb == null) return;
 
-        // Raycast to ground 
+        currentSpeed = rb.linearVelocity.magnitude;
+
+        // 1. Raycast ground check
         RaycastHit hit;
         isGrounded = Physics.Raycast(transform.position, Vector3.down, out hit, rayLength, groundLayer);
 
-
         if (isGrounded)
         {
-
-            // Movement 
-            if (Mathf.Abs(moveInput) > 0.1f)
+            // Movement force
+            if (isBraking)
             {
-                // we add force in the direction the car is facing 
+                // Handbrake
+                rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, brakeStrength * Time.fixedDeltaTime);
+            }
+            else if (Mathf.Abs(moveInput) > 0.1f)
+            {
                 rb.AddForce(transform.forward * moveInput * acceleration, ForceMode.Acceleration);
-
             }
 
-            // Steering ( only when moving ) 
-            if (rb.linearVelocity.magnitude > 0.5f)
+            // Steering (only when in motion)
+            if (currentSpeed > 0.3f)
             {
-                // if moving backward, reverse the steering 
-                float direction = Vector3.Dot(rb.linearVelocity, transform.forward) > 0 ? 1 : -1;
+                float direction = Vector3.Dot(rb.linearVelocity, transform.forward) >= 0 ? 1f : -1f;
                 float turn = turnInput * turnSpeed * direction * Time.fixedDeltaTime;
-                transform.Rotate(0, turn, 0);
+                transform.Rotate(0f, turn, 0f);
             }
 
-
-            // Calculate the rotation we Want to be at
+            // Slope / Ground alignment
             Quaternion targetRotation = Quaternion.FromToRotation(transform.up, hit.normal) * transform.rotation;
-
-
-            // Force Z to 0 so we don't roll sideways
             Vector3 euler = targetRotation.eulerAngles;
-            euler.z = 0;
+            euler.z = 0f; // Prevent roll flip
             Quaternion finalTarget = Quaternion.Euler(euler);
-
-            // this make the car lean in the hills or bumps slower and smoother
             transform.rotation = Quaternion.Slerp(transform.rotation, finalTarget, titleSmoothness * Time.fixedDeltaTime);
-
-
         }
 
-        // Max speed clamp, Stop the car from passing the max Speed value 
-        if (rb.linearVelocity.magnitude > maxSpeed)
+        // Max speed clamp
+        if (currentSpeed > maxSpeed)
         {
             rb.linearVelocity = rb.linearVelocity.normalized * maxSpeed;
         }
 
-
-
-        // Anti-Slide ( Fake breaks ) 
-        if (moveInput == 0 && rb.linearVelocity.magnitude < 2f)
+        // Anti-Slide / Coasting brake when no input
+        if (Mathf.Abs(moveInput) <= 0.1f && currentSpeed < 2f && !isBraking)
         {
-
             rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * 5f);
-
         }
-
-
     }
+    #endregion
 
-
-
+    #region Interior Visuals: Steering Wheel & Gauges
     private void UpdateSteeringWheel()
     {
-
         if (!useSteerInput || steeringWheel == null) return;
 
-        // calculate target angle based on the input 
         float targetAngle = -turnInput * maxSteeringAngle;
-
-        // smoothly rotate current angle towards the final angle target 
         currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetAngle, Time.deltaTime * steerSmoothness);
-
-        // apply the rotation on the actual wheel Gameobject
         steeringWheel.localRotation = GetAxisRotation(steeringWheelAxis, currentSteerAngle);
-
     }
-
 
     private void UpdateNeedles()
     {
+        float speedRatio = Mathf.Clamp01(currentSpeed / Mathf.Max(maxSpeed, 0.1f));
 
-
-        float currentSpeed = rb.linearVelocity.magnitude;
-        float speedRatio = Mathf.Clamp01(currentSpeed / maxSpeed);
-
-        // speedometer
+        // Speedometer Needle
         if (useSpeedometer && SpeedNeedle != null)
         {
-
-            // Map speed ration ( 0 to 1 ) between min and max angle
             float targetSpeedAngle = Mathf.Lerp(speedMinAngle, speedMaxAngle, speedRatio);
-
-            // smooth needle movement 
             currentSpeedAngle = Mathf.Lerp(currentSpeedAngle, targetSpeedAngle, Time.deltaTime * speedSmoothness);
-
-            // apply the rotation to the actual speed needle
             SpeedNeedle.localRotation = GetAxisRotation(speedNeedleAxis, currentSpeedAngle);
-
-
         }
 
-        // rpm meter
-        if(UseRPMMeter && RPMNeedle != null)
+        // RPM Meter (Simulated Multi-Gear Transmission)
+        if (UseRPMMeter && RPMNeedle != null)
         {
+            float gearBand = 1f / gearCount;
+            int currentGear = Mathf.Clamp(Mathf.FloorToInt(speedRatio / gearBand), 0, gearCount - 1);
+            float gearProgress = (speedRatio - (currentGear * gearBand)) / gearBand;
 
-            float targetRPMRatio = Mathf.Clamp01((speedRatio * 0.7f) * (MathF.Abs(moveInput) * 0.3f));
+            // Throttle boost: RPM punches up on gas press
+            float throttleEffect = Mathf.Abs(moveInput) * 0.25f;
+            float targetRPMRatio = Mathf.Clamp01(Mathf.Lerp(0.2f, 0.95f, gearProgress) + throttleEffect);
+
+            if (currentSpeed < 0.1f && Mathf.Abs(moveInput) < 0.1f)
+            {
+                targetRPMRatio = 0.05f; // Idle purr
+            }
+
+            currentCalculatedRPM = Mathf.Lerp(idleRPM, maxRPM, targetRPMRatio);
 
             float targetRPMAngle = Mathf.Lerp(RPMMinAngle, RPMMaxAngle, targetRPMRatio);
-
-            // smooth needle movement
-            currentRPMAngle = Mathf.Lerp(currentRPMAngle, targetRPMAngle, Time.deltaTime *  RPMSmoothness);
-
+            currentRPMAngle = Mathf.Lerp(currentRPMAngle, targetRPMAngle, Time.deltaTime * RPMSmoothness);
             RPMNeedle.localRotation = GetAxisRotation(RPMneedleAxis, currentRPMAngle);
+        }
+    }
+    #endregion
 
-
+    #region Retro Lighting
+    private void HandleLightingInputs()
+    {
+        if (Input.GetKeyDown(toggleHeadlightsKey))
+        {
+            headlightsOn = !headlightsOn;
+            UpdateLightObjects(headlights, headlightsOn);
+            PlaySwitchSound();
         }
 
-
-
+        if (Input.GetKeyDown(toggleInteriorLightKey))
+        {
+            interiorLightsOn = !interiorLightsOn;
+            UpdateLightObjects(interiorLights, interiorLightsOn);
+            PlaySwitchSound();
+        }
     }
 
+    private void UpdateLightObjects(GameObject[] lightObjects, bool state)
+    {
+        if (lightObjects == null) return;
+        foreach (var obj in lightObjects)
+        {
+            if (obj != null && obj.activeSelf != state)
+            {
+                obj.SetActive(state);
+            }
+        }
+    }
 
+    private void PlaySwitchSound()
+    {
+        if (switchAudioSource != null && lightSwitchSound != null)
+        {
+            switchAudioSource.PlayOneShot(lightSwitchSound);
+        }
+    }
+    #endregion
 
-    // converts a single float angle into a quaternion localRotation on the choosen axis
+    #region Audio Modulation
+    private void UpdateEngineAudio()
+    {
+        if (engineAudioSource == null) return;
+
+        float rpmRatio = Mathf.Clamp01((currentCalculatedRPM - idleRPM) / Mathf.Max(maxRPM - idleRPM, 1f));
+        engineAudioSource.pitch = Mathf.Lerp(minEnginePitch, maxEnginePitch, rpmRatio);
+    }
+    #endregion
+
+    #region Helper Methods & Gizmos
     private Quaternion GetAxisRotation(RotationAxis axis, float angle)
     {
-
         switch (axis)
         {
-            case RotationAxis.x: return Quaternion.Euler(angle, 0f, 0f);
-            case RotationAxis.y: return Quaternion.Euler(0f, angle, 0f);
-            case RotationAxis.z: return Quaternion.Euler(0f, 0f, angle);
+            case RotationAxis.X: return Quaternion.Euler(angle, 0f, 0f);
+            case RotationAxis.Y: return Quaternion.Euler(0f, angle, 0f);
+            case RotationAxis.Z: return Quaternion.Euler(0f, 0f, angle);
             default: return Quaternion.Euler(0f, 0f, angle);
         }
-
     }
 
-
-
-
+    private void OnDrawGizmosSelected()
+    {
+        // Visualize Raycast in Editor
+        Gizmos.color = isGrounded ? Color.green : Color.red;
+        Gizmos.DrawLine(transform.position, transform.position + Vector3.down * rayLength);
+        Gizmos.DrawWireSphere(transform.position + Vector3.down * rayLength, 0.1f);
+    }
+    #endregion
 }
+
+
+
+
