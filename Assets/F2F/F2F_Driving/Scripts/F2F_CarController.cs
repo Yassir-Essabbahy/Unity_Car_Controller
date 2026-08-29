@@ -21,16 +21,16 @@ public class F2F_CarController : MonoBehaviour
     #region Movement & Physics
     [Header("=== MOVEMENT & HANDLING ===")]
     [Tooltip("Engine acceleration force.")]
-    public float acceleration = 10f;
+    public float acceleration = 12f;
 
-    [Tooltip("Maximum forward/reverse speed.")]
-    public float maxSpeed = 6f;
+    [Tooltip("Maximum forward/reverse speed (higher = faster top speed).")]
+    public float maxSpeed = 20f;
 
     [Tooltip("Steering agility / turning speed.")]
-    public float turnSpeed = 8f;
+    public float turnSpeed = 10f;
 
     [Tooltip("Braking deceleration multiplier.")]
-    public float brakeStrength = 6f;
+    public float brakeStrength = 8f;
     #endregion
 
     #region Grounding & Slope Alignment
@@ -67,7 +67,7 @@ public class F2F_CarController : MonoBehaviour
     public RotationAxis RPMneedleAxis = RotationAxis.Z;
     public float RPMMinAngle = 135f;
     public float RPMMaxAngle = -45f;
-    public float RPMSmoothness = 12f;
+    public float RPMSmoothness = 10f;
 
     [Tooltip("Simulated idle RPM value.")]
     public float idleRPM = 850f;
@@ -77,6 +77,9 @@ public class F2F_CarController : MonoBehaviour
 
     [Tooltip("Number of transmission gears for realistic RPM rev & shift bounce.")]
     [Range(3, 7)] public int gearCount = 5;
+
+    [Tooltip("Time in seconds for a gear shift clutch drop.")]
+    public float shiftDuration = 0.25f;
     #endregion
 
     #region Retro Atmosphere & Lighting
@@ -115,6 +118,8 @@ public class F2F_CarController : MonoBehaviour
     private float currentSpeedAngle;
     private float currentRPMAngle;
     private float currentCalculatedRPM;
+    private int lastGear = 0;
+    private float shiftTimer = 0f;
 
     private bool headlightsOn = false;
     private bool interiorLightsOn = false;
@@ -244,20 +249,61 @@ public class F2F_CarController : MonoBehaviour
             SpeedNeedle.localRotation = GetAxisRotation(speedNeedleAxis, currentSpeedAngle);
         }
 
-        // RPM Meter (Simulated Multi-Gear Transmission)
+        // RPM Meter (Realistic Multi-Gear Transmission with Shift Timing)
         if (UseRPMMeter && RPMNeedle != null)
         {
-            float gearBand = 1f / gearCount;
-            int currentGear = Mathf.Clamp(Mathf.FloorToInt(speedRatio / gearBand), 0, gearCount - 1);
-            float gearProgress = (speedRatio - (currentGear * gearBand)) / gearBand;
-
-            // Throttle boost: RPM punches up on gas press
-            float throttleEffect = Mathf.Abs(moveInput) * 0.25f;
-            float targetRPMRatio = Mathf.Clamp01(Mathf.Lerp(0.2f, 0.95f, gearProgress) + throttleEffect);
-
-            if (currentSpeed < 0.1f && Mathf.Abs(moveInput) < 0.1f)
+            // Realistic gear speed bands (each gear takes longer and pulls harder)
+            float[] gearLimits = new float[] { 0.18f, 0.38f, 0.60f, 0.82f, 1.0f };
+            int activeGear = 0;
+            for (int i = 0; i < gearLimits.Length; i++)
             {
-                targetRPMRatio = 0.05f; // Idle purr
+                if (speedRatio <= gearLimits[i] || i == gearLimits.Length - 1)
+                {
+                    activeGear = i;
+                    break;
+                }
+            }
+
+            // Detect gear shift to trigger realistic clutch/RPM drop
+            if (activeGear != lastGear && currentSpeed > 0.5f)
+            {
+                shiftTimer = shiftDuration;
+                lastGear = activeGear;
+            }
+
+            if (shiftTimer > 0f)
+            {
+                shiftTimer -= Time.deltaTime;
+            }
+
+            // Calculate progress within current gear
+            float prevLimit = activeGear == 0 ? 0f : gearLimits[activeGear - 1];
+            float nextLimit = gearLimits[activeGear];
+            float gearProgress = Mathf.Clamp01((speedRatio - prevLimit) / Mathf.Max(nextLimit - prevLimit, 0.01f));
+
+            float throttle = Mathf.Abs(moveInput);
+            float targetRPMRatio;
+
+            if (currentSpeed < 0.1f && throttle < 0.1f)
+            {
+                targetRPMRatio = 0.02f; // Idle (~850 RPM)
+            }
+            else if (shiftTimer > 0f)
+            {
+                targetRPMRatio = 0.22f; // Clutch shift drop
+            }
+            else
+            {
+                // Engine builds revs from low gear range up to peak
+                float baseRPM = Mathf.Lerp(0.25f, 0.85f, gearProgress);
+                float throttlePunch = throttle * 0.15f;
+                targetRPMRatio = Mathf.Clamp01(baseRPM + throttlePunch);
+
+                // Engine braking drop when letting off throttle
+                if (throttle < 0.1f && currentSpeed > 0.5f)
+                {
+                    targetRPMRatio = Mathf.Lerp(0.12f, 0.32f, gearProgress);
+                }
             }
 
             currentCalculatedRPM = Mathf.Lerp(idleRPM, maxRPM, targetRPMRatio);
