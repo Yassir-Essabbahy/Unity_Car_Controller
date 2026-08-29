@@ -1,0 +1,67 @@
+# ========== UNITY ==========
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Logs/
+
+# Crash reports
+sysinfo.txt
+
+# User settings
+UserSettings/
+
+# Visual Studio / Rider / VSCode
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Unity cache
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Build outputs
+*.apk
+*.aab
+*.exe
+*.app
+*.unitypackage
+*.xcodeproj
+*.xcworkspace
+*.ipa
+
+# Crash dumps
+*.dmp
+
+# Addressables cache
+Assets/AddressableAssetsData/*/*.bin*
+
+# Gradle
+.gradle/
+gradle/
+
+# StreamingAssets auto generated
+Assets/StreamingAssets/aa/
+
+# Logs
+*.log
