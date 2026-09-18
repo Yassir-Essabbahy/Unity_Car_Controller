@@ -12,21 +12,29 @@ public class Dirt_Prop_Cleaning : MonoBehaviour, ICleanable
     
     public Transform childTransform;
 
+    [SerializeField] private Renderer dirtRenderer; // Reference to the Renderer component of the dirt object
+    private Material dirtMaterial; // Reference to the material of the dirt object
+private static readonly int DissolvePropID = Shader.PropertyToID("_DissolveAmount_");
     void Awake()
     {
         currDirtHealth = maxHealth; // set current to full health
 
-        InitialScale = childTransform.transform.localScale; // take original scale of object
+        if (dirtRenderer != null)
+        {
+            dirtMaterial = dirtRenderer.material; // Get the material from the renderer
+        }
     }
 
     public void Clean(float cleanAmount)
     {
         currDirtHealth -= cleanAmount;
 
-        float healthRatio = Mathf.Clamp01(currDirtHealth / maxHealth);
+        float dissolveRatio = 1f - Mathf.Clamp01(currDirtHealth / maxHealth);
 
-        childTransform.transform.localScale = InitialScale * healthRatio;
-
+        if (dirtMaterial != null)
+        {
+            dirtMaterial.SetFloat(DissolvePropID, dissolveRatio);
+        }
         if(currDirtHealth <= 0)
         {
             Destroy(gameObject);
