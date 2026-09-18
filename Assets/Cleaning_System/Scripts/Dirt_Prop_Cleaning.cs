@@ -1,7 +1,9 @@
 using UnityEngine;
+using System;
 
-public class Dirt_Prop_Cleaning : MonoBehaviour
+public class Dirt_Prop_Cleaning : MonoBehaviour, ICleanable
 {
+    public static event Action onDirtCleaned;
     public float maxHealth = 100f;
 
     private float currDirtHealth;
@@ -17,7 +19,7 @@ public class Dirt_Prop_Cleaning : MonoBehaviour
         InitialScale = childTransform.transform.localScale; // take original scale of object
     }
 
-    public void CleanMop(float cleanAmount)
+    public void Clean(float cleanAmount)
     {
         currDirtHealth -= cleanAmount;
 
@@ -28,6 +30,7 @@ public class Dirt_Prop_Cleaning : MonoBehaviour
         if(currDirtHealth <= 0)
         {
             Destroy(gameObject);
+            onDirtCleaned?.Invoke();
             // Next Objectives Here :
 
         }
